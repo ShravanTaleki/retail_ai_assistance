@@ -1,0 +1,26 @@
+# Python / Environment
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.env
+
+# Generated Synthetic Data 
+# (Users will generate this locally via generate_data.py)
+data/*.csv
+data/*.json
+!data/.gitkeep
+
+# Streamlit
+.streamlit/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

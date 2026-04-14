@@ -3,30 +3,39 @@ import pandas as pd
 from langchain_core.tools import tool
 from config import DATA_DIR
 
-def _recs(text: str):
-    return re.findall(r"-\s(.+?)\s\(", text)
+
+def _parse_recommended_names(text: str) -> list[str]:
+    """Extract product names from recommendation bullets."""
+    return re.findall(r"-\s(.+?)\s\(match", text)
+
 
 @tool
 def get_alternatives(recommendations_data: str, colors: str):
-    """Return comparative alternatives in same category."""
+    """For each recommended product, find the cheapest same-category alternative in preferred colors."""
     df = pd.read_csv(DATA_DIR / "products.csv")
     prefs = {c.strip().lower() for c in str(colors).split(",") if c.strip()}
-    pairs = []
-    
-    for name in _recs(recommendations_data):
-        rec = df[df["product"] == name].head(1)
-        if rec.empty: continue
-        rec = rec.iloc[0]
-        
-        alt = df[(df["category"] == rec["category"]) & (df["product"] != rec["product"])]
+    pairs: list[str] = []
+
+    for name in _parse_recommended_names(recommendations_data):
+        rec = df.loc[df["product"] == name]
+        if rec.empty:
+            continue
+        rec_row = rec.iloc[0]
+
+        # Find alternatives: same category, different product
+        alt_pool = df.loc[
+            (df["category"] == rec_row["category"]) & (df["product"] != rec_row["product"])
+        ].copy()
+        if alt_pool.empty:
+            continue
+
+        # Prefer color-matched alternatives when available
         if prefs:
-            color_match = alt[alt["color"].str.lower().isin(prefs)]
-            alt = color_match if not color_match.empty else alt
-            
-        if alt.empty: continue
-        a = alt.sort_values("price").iloc[0]
-        
-        # Clean, concise comparison
-        pairs.append(f"- {a['product']} vs {rec['product']} (budget vs premium comparison)")
-        
+            color_match = alt_pool.loc[alt_pool["color"].str.lower().isin(prefs)]
+            if not color_match.empty:
+                alt_pool = color_match
+
+        cheapest = alt_pool.sort_values("price").iloc[0]
+        pairs.append(f"- {cheapest['product']} vs {rec_row['product']} (budget vs premium)")
+
     return "\n".join(pairs[:3]) if pairs else "- No close alternatives found."

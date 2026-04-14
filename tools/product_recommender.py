@@ -2,40 +2,52 @@ import pandas as pd
 from langchain_core.tools import tool
 from config import DATA_DIR
 
+
 @tool
-def get_product_recommendations(budget: int, colors: str, brand: str, gender: str = "General"):
-    """Return filtered markdown recommendations with strict gender/style rules."""
+def get_product_recommendations(budget: int, colors: str, brand: str, primary_interest: str = ""):
+    """Return up to 3 deduplicated product recommendations filtered by budget, interest, color & brand."""
     df = pd.read_csv(DATA_DIR / "products.csv")
     prefs = [c.strip().lower() for c in str(colors).split(",") if c.strip()]
-    
-    pool = df[df["price"] <= int(budget)].copy()
-    
-    # Strict Gender/Style Filter
-    g = str(gender).lower()
-    if any(x in g for x in ["male", "mens", "streetwear"]):
-        pool = pool[~pool["category"].isin(["Dress", "Heels"])]
-    elif any(x in g for x in ["female", "womens"]):
-        # Keep all or apply specific female filters if needed
-        pass
+    budget = int(budget)
 
-    pool = pool[pool["color"].str.lower().isin(prefs) | pool["brand"].str.lower().eq(str(brand).lower())]
-    pool["score"] = pool["brand"].str.lower().eq(str(brand).lower()).astype(int) * 2 + pool["color"].str.lower().isin(prefs).astype(int)
-    top = pool.sort_values(["score", "price"], ascending=[False, True]).head(3)
-    
-    if top.empty:
-        return "- No exact matches found for your style and budget."
-        
-    items = []
-    for r in top.itertuples(index=False):
-        color_hit = r.color.lower() in prefs
-        brand_hit = r.brand.lower() == str(brand).lower()
-        if color_hit and brand_hit:
-            why = "(matches color and brand preference)"
-        elif brand_hit:
-            why = "(matches brand preference)"
+    # 1. Budget gate
+    pool = df.loc[df["price"] <= budget].copy()
+    if pool.empty:
+        return "- No products found within your budget."
+
+    # 2. Primary interest filter — boost matching category, but keep others as fallback
+    interest = str(primary_interest).strip()
+    interest_pool = pool.loc[pool["category"].str.lower() == interest.lower()] if interest else pd.DataFrame()
+
+    # 3. Color + brand preference filter
+    color_mask = pool["color"].str.lower().isin(prefs)
+    brand_mask = pool["brand"].str.lower() == str(brand).strip().lower()
+    filtered = pool.loc[color_mask | brand_mask].copy()
+    if filtered.empty:
+        return "- No products found matching your color/brand preferences."
+
+    # 4. Score: interest match + brand match + color match
+    filtered["_score"] = (
+        filtered["category"].str.lower().eq(interest.lower()).astype(int) * 3
+        + brand_mask[filtered.index].astype(int) * 2
+        + color_mask[filtered.index].astype(int)
+    )
+
+    # 5. Dedup + top 3
+    filtered = filtered.drop_duplicates(subset="product")
+    top = filtered.sort_values(["_score", "price"], ascending=[False, True]).head(3)
+
+    # 6. Build bullet strings
+    lines: list[str] = []
+    for row in top.itertuples(index=False):
+        c_hit = row.color.lower() in prefs
+        b_hit = row.brand.lower() == str(brand).strip().lower()
+        if c_hit and b_hit:
+            tag = "(matches color & brand)"
+        elif b_hit:
+            tag = "(matches brand)"
         else:
-            why = "(matches color preference)"
-        
-        items.append(f"- {r.product} {why}")
-        
-    return "\n".join(items)
+            tag = "(matches color)"
+        lines.append(f"- {row.product} {tag}")
+
+    return "\n".join(lines)

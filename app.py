@@ -2,7 +2,11 @@ import re
 import pandas as pd
 import streamlit as st
 from agent_orchestration import run_agent
+import logging
 from config import DATA_DIR, MODEL_NAME
+from data_loader import load_users, clear_users_cache
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # ── Page Config (Compact & Wide) ──────────────────────────────────────────────
 st.set_page_config(page_title="Retail AI Studio", layout="wide", page_icon="✨", initial_sidebar_state="expanded")
@@ -60,11 +64,10 @@ def parse_agent_output(md_text):
         sections[title] = content
     return sections
 
-# ── Data Guard ────────────────────────────────────────────────────────────────
 if not (DATA_DIR / "users.csv").exists():
     st.error("System Error: Data missing. Run `generate_data.py`.")
     st.stop()
-users = pd.read_csv(DATA_DIR / "users.csv")
+users = load_users()
 
 # ── Sidebar: Control Panel ────────────────────────────────────────────────────
 with st.sidebar:
@@ -128,7 +131,8 @@ if submit:
             "favorite_colors":  p["favorite_colors"],
         }])
         new_row.to_csv(DATA_DIR / "users.csv", mode="a", header=False, index=False)
-        users = pd.concat([users, new_row], ignore_index=True)  # update in-memory
+        clear_users_cache() # Clear cache to refresh datasets dynamically
+        users = load_users()  # update in-memory instance from cache
         st.toast("✅ New shopper profile saved to database!")
 
     with st.spinner("✨ Aggregating Pandas rules & executing LLM..."):

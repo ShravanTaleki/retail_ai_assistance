@@ -1,12 +1,13 @@
 import pandas as pd
+from typing import List
 from langchain_core.tools import tool
-from config import DATA_DIR
+from data_loader import load_products
 
 
 @tool
-def get_product_recommendations(budget: int, colors: str, brand: str, primary_interest: str = ""):
+def get_product_recommendations(budget: int, colors: str, brand: str, primary_interest: str = "") -> str:
     """Return up to 3 deduplicated product recommendations filtered by budget, interest, color & brand."""
-    df = pd.read_csv(DATA_DIR / "products.csv")
+    df = load_products()
     prefs = [c.strip().lower() for c in str(colors).split(",") if c.strip()]
     budget = int(budget)
 
@@ -38,7 +39,7 @@ def get_product_recommendations(budget: int, colors: str, brand: str, primary_in
     top = filtered.sort_values(["_score", "price"], ascending=[False, True]).head(3)
 
     # 6. Build bullet strings
-    lines: list[str] = []
+    lines: List[str] = []
     for row in top.itertuples(index=False):
         c_hit = row.color.lower() in prefs
         b_hit = row.brand.lower() == str(brand).strip().lower()

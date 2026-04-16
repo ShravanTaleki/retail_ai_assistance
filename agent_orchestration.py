@@ -1,5 +1,6 @@
 """Linear agent orchestrator: gather data via Pandas tools → format via LLM (or deterministic fallback)."""
 import re
+import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
 from tools import (
@@ -139,8 +140,10 @@ def run_agent(user_id: int = None, custom_profile: dict = None) -> str:
         # Validation check: Ensure the LLM didn't hallucinate a completely different format
         if "### Your Profile Summary" in md and "*Disclaimer" in md:
             return md
-    except Exception:
-        pass
+        else:
+            logging.warning("LLM hallucinatted output format. Falling back to deterministic formatter.")
+    except Exception as exc:
+        logging.error("LLM invocation failed.", exc_info=exc)
         
     # 5. Return deterministic string if LLM fails
     return fb

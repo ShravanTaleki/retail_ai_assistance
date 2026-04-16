@@ -1,13 +1,12 @@
-import pandas as pd
 from langchain_core.tools import tool
-from config import DATA_DIR
+from data_loader import load_social, load_purchases
 
 @tool
-def get_peer_purchases(user_id: int):
+def get_peer_purchases(user_id: int) -> str:
     """Return one natural-language peer insight."""
-    net = pd.read_csv(DATA_DIR / "social_networks.csv")
+    net = load_social()
     peers = net[net.user_id == int(user_id)]["peer_id"]
-    buy = pd.read_csv(DATA_DIR / "past_purchases.csv")
+    buy = load_purchases()
     rows = buy[buy.user_id.isin(peers)]
     if rows.empty:
         return "Insight: Peer purchase signals are currently limited."

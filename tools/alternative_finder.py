@@ -1,20 +1,21 @@
 import re
 import pandas as pd
 from langchain_core.tools import tool
-from config import DATA_DIR
+from typing import List
+from data_loader import load_products
 
 
-def _parse_recommended_names(text: str) -> list[str]:
+def _parse_recommended_names(text: str) -> List[str]:
     """Extract product names from recommendation bullets."""
     return re.findall(r"-\s(.+?)\s\(match", text)
 
 
 @tool
-def get_alternatives(recommendations_data: str, colors: str):
+def get_alternatives(recommendations_data: str, colors: str) -> str:
     """For each recommended product, find the cheapest same-category alternative in preferred colors."""
-    df = pd.read_csv(DATA_DIR / "products.csv")
+    df = load_products()
     prefs = {c.strip().lower() for c in str(colors).split(",") if c.strip()}
-    pairs: list[str] = []
+    pairs: List[str] = []
 
     for name in _parse_recommended_names(recommendations_data):
         rec = df.loc[df["product"] == name]

@@ -1,18 +1,19 @@
 import re
 import pandas as pd
 from langchain_core.tools import tool
-from config import DATA_DIR
+from typing import List
+from data_loader import load_products
 
 
-def _parse_recommended_names(text: str) -> list[str]:
+def _parse_recommended_names(text: str) -> List[str]:
     """Extract product names from recommendation bullet strings."""
     return re.findall(r"-\s(.+?)\s\(match", text)
 
 
 @tool
-def get_future_purchases(budget: int = 150, recommendations_data: str = ""):
+def get_future_purchases(budget: int = 150, recommendations_data: str = "") -> str:
     """Suggest 2 complementary items from different categories than the ones already recommended."""
-    df = pd.read_csv(DATA_DIR / "products.csv")
+    df = load_products()
     budget = int(budget)
 
     # Determine which categories were already recommended

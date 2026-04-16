@@ -37,6 +37,6 @@ def get_alternatives(recommendations_data: str, colors: str) -> str:
                 alt_pool = color_match
 
         cheapest = alt_pool.sort_values("price").iloc[0]
-        pairs.append(f"- {cheapest['product']} vs {rec_row['product']} (budget vs premium)")
+        pairs.append(f"- {cheapest['product']}")
 
-    return "\n".join(pairs[:3]) if pairs else "- No close alternatives found."
+    return "\n".join(pairs[:15]) if pairs else "- No close alternatives found."

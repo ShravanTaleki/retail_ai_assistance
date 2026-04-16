@@ -15,35 +15,39 @@ from tools import (
 from config import MODEL_NAME
 
 # ── Strict formatting prompt ─────────────────────────────────────────────────
-SYSTEM_PROMPT = """You are a formatting assistant. Your job is to take the EXACT text provided by the tools and place it into the correct sections. Do not mix outputs. Do not write your own text.
+SYSTEM_PROMPT = """You are an elite Personalized Retail AI Assistant. You will receive a User Profile, Local Trends, and Candidate Pools for products.
 
-RULES:
-1. RecommendationTool output → "Recommended for You" ONLY.
-2. FuturePurchaseTool output → "Next Likely Purchases" ONLY.
-3. AlternativeFinderTool output → "Alternatives" ONLY.
+YOUR MISSION:
+1. Select 3-5 products from the Candidate Pool that best fit the user's budget, style, and context.
+2. Select 1-2 Future Purchases and 1-2 Alternatives.
+3. You MUST provide a 1-sentence personalized reasoning for EVERY item you select.
+CRITICAL RULE: You must write ORIGINAL reasoning that makes logical sense for the SPECIFIC products you selected. Do not compare unrelated items and do not mention items you did not recommend.
 
-OUTPUT TEMPLATE:
+CRITICAL ETHICS RULE: Keep your tone helpful but objective. Do NOT use manipulative sales tactics (e.g., "Buy now before it's gone!"), do NOT make guaranteed savings claims, and do NOT make discriminatory assumptions based on gender, race, or body type. Clearly label all recommendations as suggestions.
+
+EXAMPLE OUTPUT FORMAT (Follow this structure exactly, including the exact ### headers):
+
 ### Your Profile Summary
-- [Age Group], interested in [Primary Interest], \\$[Budget] budget
-- Prefers [Colors] and [Brand]
-- Location: [Location]
-- Upcoming Event: [Events]
+- [Insert user age, interest, and budget]
+- [Insert color and brand preferences]
+- Location: [Insert location]
+- Upcoming Event: [Insert event]
 
 ### Local Trend & Peer Insight
-- [Exact string from TrendTool]
-- [Exact string from SocialTool]
-- [Exact string from EventTool]
+- [Insert trend insight from tools]
+- [Insert peer insight from tools]
 
 ### Recommended for You
-[Exact bullets from RecommendationTool]
+- **[Selected Product Name 1]**: [Write original reasoning explaining how this specific item fits the user's budget, favorite color, or preferred brand].
+- **[Selected Product Name 2]**: [Write original reasoning explaining how this specific item connects to the local trends or upcoming events].
+- **[Selected Product Name 3]**: [Write original reasoning explaining why this is a good fit].
 
 ### Next Likely Purchases
-[Exact bullets from FuturePurchaseTool]
+- **[Selected Future Product]**: [Write original reasoning explaining exactly how this item logically pairs with the specific products recommended above].
 
 ### Alternatives
-[Exact bullets from AlternativeFinderTool]
-
-*Disclaimer: Recommendations are based on synthetic demo data.*"""
+- **[Alternative Product Name]**: [Write original reasoning explaining why this item is a great alternative to one of your recommendations based on being a different price tier or brand].
+"""
 
 # ── Formatting helpers ────────────────────────────────────────────────────────
 def _bullets(text: str) -> list[str]:
@@ -67,13 +71,13 @@ def _fallback(p: dict, t: str, s: str, ev: str, r: str, n: str, a: str) -> str:
         f"- {ev}",
         "",
         "### Recommended for You",
-        *_bullets(r),
+        *_bullets(r)[:5],  # Fallback gracefully limits list
         "",
         "### Next Likely Purchases",
-        *_bullets(n),
+        *_bullets(n)[:3],
         "",
         "### Alternatives",
-        *_bullets(a),
+        *_bullets(a)[:3],
         "",
         "*Disclaimer: Recommendations are based on synthetic demo data.*",
     ])
@@ -87,21 +91,37 @@ def run_agent(user_id: int = None, custom_profile: dict = None) -> str:
         "user_id": user_id,
         "profile": custom_profile,
     })
-    t = get_local_trends.invoke({"location": p.get("location", "")})
+    
+    # --- MISSING DATA SANITIZATION ---
+    # Handle missing location
+    loc = p.get("location", "")
+    safe_loc = loc if loc and str(loc).strip() else "Not Specified / Online"
+    p["location"] = safe_loc
+    
+    # Handle missing or invalid budget
+    raw_budget = p.get("budget", 150)
+    try:
+        safe_budget = int(raw_budget) if raw_budget else 150
+    except (ValueError, TypeError):
+        safe_budget = 150
+    p["budget"] = safe_budget
+    # ---------------------------------
+
+    t = get_local_trends.invoke({"location": safe_loc})
     s = (
         get_peer_purchases.invoke({"user_id": p.get("user_id", 0)})
         if p.get("user_id")
         else "Insight: Peer purchase signals are currently limited for new users."
     )
-    ev = get_upcoming_events.invoke({"location": p.get("location", "")})
+    ev = get_upcoming_events.invoke({"location": safe_loc})
     r = get_product_recommendations.invoke({
-        "budget": int(p.get("budget", 150)),
+        "budget": safe_budget,
         "colors": p.get("favorite_colors", ""),
         "brand": p.get("brand_affinity", ""),
         "primary_interest": p.get("primary_interest", ""),
     })
     n = get_future_purchases.invoke({
-        "budget": int(p.get("budget", 150)),
+        "budget": safe_budget,
         "recommendations_data": r,
     })
     a = get_alternatives.invoke({
@@ -126,9 +146,9 @@ def run_agent(user_id: int = None, custom_profile: dict = None) -> str:
         f"TrendTool: {t}",
         f"SocialTool: {s}",
         f"EventTool: {ev}",
-        f"RecommendationTool: {r}",
-        f"FuturePurchaseTool: {n}",
-        f"AlternativeFinderTool: {a}",
+        f"Candidate Product Pool: {r}",
+        f"Candidate Future Purchases: {n}",
+        f"Candidate Alternatives: {a}",
     ])
 
     # 4. Invoke LLM for formatting
@@ -137,11 +157,13 @@ def run_agent(user_id: int = None, custom_profile: dict = None) -> str:
             [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user_text)]
         ).content
         
-        # Validation check: Ensure the LLM didn't hallucinate a completely different format
-        if "### Your Profile Summary" in md and "*Disclaimer" in md:
-            return md
+        # Validation check: Ensure the LLM generated the core headers
+        if "### Your Profile Summary" in md:
+            # Safely append the disclaimer in Python instead of relying on the LLM
+            final_output = md.strip() + "\n\n*Disclaimer: Recommendations are based on synthetic demo data.*"
+            return final_output
         else:
-            logging.warning("LLM hallucinatted output format. Falling back to deterministic formatter.")
+            logging.warning("LLM hallucinated output format. Falling back to deterministic formatter.")
     except Exception as exc:
         logging.error("LLM invocation failed.", exc_info=exc)
         

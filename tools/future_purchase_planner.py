@@ -34,6 +34,6 @@ def get_future_purchases(budget: int = 150, recommendations_data: str = "") -> s
     picks = pool.groupby("category", group_keys=False).apply(
         lambda grp: grp.nsmallest(1, "price")
     )
-    picks = picks.head(2)
+    picks = picks.head(10)
 
     return "\n".join(f"- {r.product}" for r in picks.itertuples())

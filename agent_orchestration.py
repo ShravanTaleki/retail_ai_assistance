@@ -1,5 +1,6 @@
 """Linear agent orchestrator: gather data via Pandas tools → format via LLM (or deterministic fallback)."""
 import re
+import json
 import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
@@ -129,10 +130,17 @@ def run_agent(user_id: int = None, custom_profile: dict = None) -> str:
         "colors": p.get("favorite_colors", ""),
     })
 
-    # 2. Build the fallback in case the LLM fails or goes rogue
-    fb = _fallback(p, t, s, ev, r, n, a)
+    # 2. Extract text from the structured JSON for the LLM and fallback
+    try:
+        r_data = json.loads(r)
+        r_text = r_data.get("text", r)
+    except json.JSONDecodeError:
+        r_text = r
 
-    # 3. Construct the LLM payload
+    # 3. Build the fallback in case the LLM fails or goes rogue
+    fb = _fallback(p, t, s, ev, r_text, n, a)
+
+    # 4. Construct the LLM payload
     user_text = "\n".join([
         f"Age Group: {p.get('age_group', 'Adult')}",
         f"Primary Interest: {p.get('primary_interest', 'General')}",
@@ -146,9 +154,9 @@ def run_agent(user_id: int = None, custom_profile: dict = None) -> str:
         f"TrendTool: {t}",
         f"SocialTool: {s}",
         f"EventTool: {ev}",
-        f"Candidate Product Pool: {r}",
-        f"Candidate Future Purchases: {n}",
-        f"Candidate Alternatives: {a}",
+        f"Candidate Product Pool:\n{r_text}",
+        f"Candidate Future Purchases:\n{n}",
+        f"Candidate Alternatives:\n{a}",
     ])
 
     # 4. Invoke LLM for formatting

@@ -1,13 +1,8 @@
-import re
+import json
 import pandas as pd
 from langchain_core.tools import tool
 from typing import List
 from data_loader import load_products
-
-
-def _parse_recommended_names(text: str) -> List[str]:
-    """Extract product names from recommendation bullet strings."""
-    return re.findall(r"-\s(.+?)\s\(match", text)
 
 
 @tool
@@ -16,10 +11,14 @@ def get_future_purchases(budget: int = 150, recommendations_data: str = "") -> s
     df = load_products()
     budget = int(budget)
 
-    # Determine which categories were already recommended
-    rec_names = _parse_recommended_names(recommendations_data)
-    rec_rows = df.loc[df["product"].isin(rec_names)]
-    already_cats = set(rec_rows["category"].str.lower()) if not rec_rows.empty else set()
+    # Parse already recommended categories
+    already_cats = set()
+    try:
+        data = json.loads(recommendations_data)
+        if "items" in data:
+            already_cats = {item.get("category", "").lower() for item in data["items"]}
+    except json.JSONDecodeError:
+        pass  # Fallback to empty if not valid JSON
 
     # Candidate pool: within budget, from a NEW category
     pool = df.loc[df["price"] <= budget].copy()

@@ -131,30 +131,36 @@ div[data-testid="stVerticalBlockBorderWrapper"]:hover {
 
 # ── Helper: Markdown Parsers ──────────────────────────────────────────────────
 def parse_agent_output(md_text):
-    """Splits the raw markdown by '###' to feed into sections."""
+    """Splits the raw markdown by headers to feed into sections."""
     sections = {}
-    parts = md_text.split("### ")
     
     disclaimer = ""
     if "Disclaimer:" in md_text:
-        # Dynamically extract whatever follows Disclaimer:
         idx = md_text.find("Disclaimer:")
         disclaimer = "*Disclaimer:" + md_text[idx + len("Disclaimer:"):].strip()
         
+    parts = re.split(r"(?m)^#{2,4}\s+", md_text)
+    
     for part in parts:
         if not part.strip(): continue
         lines = part.strip().split('\n')
-        title = lines[0].strip()
+        title = lines[0].strip().replace("*", "").replace(":", "")
         content = '\n'.join(lines[1:]).strip()
         
-        # Strip out the disclaimer if it ended up in the last section's content
         if "Disclaimer:" in content:
             idx = content.find("Disclaimer:")
-            # Also remove an asterisk if it's there
             if idx > 0 and content[idx-1] == "*":
                 idx -= 1
             content = content[:idx].strip()
             
+        # Normalize titles to ensure UI compatibility
+        title_lower = title.lower()
+        if "profile summary" in title_lower: title = "Your Profile Summary"
+        elif "local trend" in title_lower or "peer insight" in title_lower: title = "Local Trend & Peer Insight"
+        elif "recommend" in title_lower: title = "Recommended for You"
+        elif "next" in title_lower or "future" in title_lower or "likely" in title_lower: title = "Next Likely Purchases"
+        elif "alternative" in title_lower: title = "Alternatives"
+
         sections[title] = content
         
     return sections, disclaimer
@@ -276,14 +282,21 @@ if submit:
             "brand_affinity":   p["brand_affinity"],
             "favorite_colors":  p["favorite_colors"],
         }])
-        try:
-            new_row.to_csv(DATA_DIR / "users.csv", mode="a", header=False, index=False)
-            clear_users_cache() 
-            users = load_users()  
-            st.toast("✅ New shopper profile saved to database!")
-        except PermissionError:
-            st.error("Cannot save profile: The users.csv file is currently open in another program (like Excel). Please close it and try again.")
-            st.stop()
+        import time
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                new_row.to_csv(DATA_DIR / "users.csv", mode="a", header=False, index=False)
+                clear_users_cache() 
+                users = load_users()  
+                st.toast("✅ New shopper profile saved to database!")
+                break
+            except PermissionError:
+                if attempt < max_retries - 1:
+                    time.sleep(0.5)
+                else:
+                    st.error("Cannot save profile: The users.csv file is currently open in another program (like Excel). Please close it and try again.")
+                    st.stop()
 
     with st.spinner("✨ Analyzing profile and local trends..."):
         try:

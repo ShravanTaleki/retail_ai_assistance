@@ -1,12 +1,13 @@
+import json
 import pandas as pd
-from typing import List
+from typing import List, Dict, Any
 from langchain_core.tools import tool
 from data_loader import load_products
 
 
 @tool
 def get_product_recommendations(budget: int, colors: str, brand: str, primary_interest: str = "") -> str:
-    """Return up to 15 deduplicated product recommendations filtered by budget, interest, color & brand."""
+    """Return JSON string of up to 15 deduplicated product recommendations filtered by budget, interest, color & brand."""
     df = load_products()
     prefs = [c.strip().lower() for c in str(colors).split(",") if c.strip()]
     budget = int(budget)
@@ -14,7 +15,7 @@ def get_product_recommendations(budget: int, colors: str, brand: str, primary_in
     # 1. Budget gate
     pool = df.loc[df["price"] <= budget].copy()
     if pool.empty:
-        return "- No products found within your budget."
+        return json.dumps({"text": "- No products found within your budget.", "items": []})
 
     # 2. Primary interest filter — boost matching category, but keep others as fallback
     interest = str(primary_interest).strip()
@@ -25,7 +26,7 @@ def get_product_recommendations(budget: int, colors: str, brand: str, primary_in
     brand_mask = pool["brand"].str.lower() == str(brand).strip().lower()
     filtered = pool.loc[color_mask | brand_mask].copy()
     if filtered.empty:
-        return "- No products found matching your color/brand preferences."
+        return json.dumps({"text": "- No products found matching your color/brand preferences.", "items": []})
 
     # 4. Score: interest match + brand match + color match
     filtered["_score"] = (
@@ -38,8 +39,9 @@ def get_product_recommendations(budget: int, colors: str, brand: str, primary_in
     filtered = filtered.drop_duplicates(subset="product")
     top = filtered.sort_values(["_score", "price"], ascending=[False, True]).head(15)
 
-    # 6. Build bullet strings
+    # 6. Build structured output
     lines: List[str] = []
+    items: List[Dict[str, Any]] = []
     for row in top.itertuples(index=False):
         c_hit = row.color.lower() in prefs
         b_hit = row.brand.lower() == str(brand).strip().lower()
@@ -50,5 +52,15 @@ def get_product_recommendations(budget: int, colors: str, brand: str, primary_in
         else:
             tag = "(matches color)"
         lines.append(f"- {row.product} {tag}")
+        items.append({
+            "product": row.product,
+            "category": row.category,
+            "brand": row.brand,
+            "color": row.color,
+            "price": float(row.price)
+        })
 
-    return "\n".join(lines)
+    return json.dumps({
+        "text": "\n".join(lines),
+        "items": items
+    })

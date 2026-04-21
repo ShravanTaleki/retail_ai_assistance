@@ -19,8 +19,8 @@ from config import MODEL_NAME
 SYSTEM_PROMPT = """You are an elite Personalized Retail AI Assistant. You will receive a User Profile, Local Trends, and Candidate Pools for products.
 
 YOUR MISSION:
-1. Select 3-5 products from the Candidate Pool that best fit the user's budget, style, and context.
-2. Select 1-2 Future Purchases and 1-2 Alternatives.
+1. Select 5-6 products from the Candidate Pool that best fit the user's budget, style, and context.
+2. Select 3-6 Future Purchases and 3-6 Alternatives.
 3. You MUST provide a 1-sentence personalized reasoning for EVERY item you select.
 CRITICAL RULE: You must write ORIGINAL reasoning that makes logical sense for the SPECIFIC products you selected. Do not compare unrelated items and do not mention items you did not recommend.
 
@@ -39,15 +39,22 @@ EXAMPLE OUTPUT FORMAT (Follow this structure exactly, including the exact ### he
 - [Insert peer insight from tools]
 
 ### Recommended for You
-- **[Selected Product Name 1]**: [Write original reasoning explaining how this specific item fits the user's budget, favorite color, or preferred brand].
-- **[Selected Product Name 2]**: [Write original reasoning explaining how this specific item connects to the local trends or upcoming events].
-- **[Selected Product Name 3]**: [Write original reasoning explaining why this is a good fit].
+- **[Selected Product Name 1]**: [Reasoning tied to budget or color preference].
+- **[Selected Product Name 2]**: [Reasoning tied to local trends or upcoming events].
+- **[Selected Product Name 3]**: [Reasoning tied to brand affinity].
+- **[Selected Product Name 4]**: [Reasoning tied to past purchases or interest].
+- **[Selected Product Name 5]**: [Reasoning tied to social signals].
+- **[Selected Product Name 6]**: [Reasoning for any strong fit].
 
 ### Next Likely Purchases
-- **[Selected Future Product]**: [Write original reasoning explaining exactly how this item logically pairs with the specific products recommended above].
+- **[Future Product 1]**: [Reasoning: complements the recommended items above].
+- **[Future Product 2]**: [Reasoning: complements the recommended items above].
+- **[Future Product 3]**: [Reasoning: complements the recommended items above].
 
 ### Alternatives
-- **[Alternative Product Name]**: [Write original reasoning explaining why this item is a great alternative to one of your recommendations based on being a different price tier or brand].
+- **[Alternative Product 1]**: [Reasoning: different brand or price tier than a recommendation].
+- **[Alternative Product 2]**: [Reasoning: different brand or price tier than a recommendation].
+- **[Alternative Product 3]**: [Reasoning: different brand or price tier than a recommendation].
 """
 
 # ── Formatting helpers ────────────────────────────────────────────────────────
@@ -57,6 +64,21 @@ def _bullets(text: str) -> list[str]:
         return lines
     nums = [f"- {m.strip()}" for m in re.findall(r"\d+\.\s(.*?)(?=\s\d+\.|$)", str(text))]
     return nums or [f"- {str(text).split(':', 1)[-1].strip()}"]
+
+def _inject_prices(md: str, price_map: dict) -> str:
+    """Scan every bold product bullet and prepend the real price from the CSV lookup (case-insensitive)."""
+    def _replacer(match):
+        name = match.group(1).strip()
+        separator = match.group(2)
+        rest = match.group(3).strip()
+        # Case-insensitive lookup: the LLM may alter capitalisation slightly
+        # Also strip tags like "(premium alternative)" that the LLM copies from candidate lists
+        clean_name = re.sub(r'\s*\(.*?\)\s*$', '', name).strip()
+        price = price_map.get(clean_name.lower())
+        if price and f"${price:.2f}" not in rest:
+            return f"**{name}**{separator} ${price:.2f} — {rest}"
+        return match.group(0)
+    return re.sub(r'\*\*(.*?)\*\*(\s*:?\s*)(.*)', _replacer, md)
 
 def _fallback(p: dict, t: str, s: str, ev: str, r: str, n: str, a: str) -> str:
     return "\n".join([
@@ -134,11 +156,18 @@ def run_agent(user_id: int = None, custom_profile: dict = None) -> str:
     try:
         r_data = json.loads(r)
         r_text = r_data.get("text", r)
+        items = r_data.get("items", [])
     except json.JSONDecodeError:
         r_text = r
+        items = []
 
-    # 3. Build the fallback in case the LLM fails or goes rogue
-    fb = _fallback(p, t, s, ev, r_text, n, a)
+    # Build a case-insensitive price lookup map from the full products CSV
+    from data_loader import load_products
+    all_products_df = load_products()
+    price_map = {row.product.lower(): float(row.price) for row in all_products_df.itertuples(index=False)}
+
+    # 3. Build the fallback in case the LLM fails or goes rogue (also inject prices)
+    fb = _inject_prices(_fallback(p, t, s, ev, r_text, n, a), price_map)
 
     # 4. Construct the LLM payload
     user_text = "\n".join([
@@ -167,6 +196,8 @@ def run_agent(user_id: int = None, custom_profile: dict = None) -> str:
         
         # Validation check: Ensure the LLM generated the core headers
         if "### Your Profile Summary" in md:
+            # Inject real prices from CSV before storing in session state
+            md = _inject_prices(md, price_map)
             # Safely append the disclaimer in Python instead of relying on the LLM
             final_output = md.strip() + "\n\n*Disclaimer: Recommendations are based on synthetic demo data.*"
             return final_output

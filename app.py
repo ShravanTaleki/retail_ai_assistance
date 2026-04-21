@@ -167,12 +167,11 @@ def parse_agent_output(md_text):
     return sections, disclaimer
 
 def extract_price(text):
-    """Extracts $ price from text or defaults to mock price."""
-    import random
+    """Extracts $ price from text. Price is always injected by the orchestrator from the CSV."""
     match = re.search(r'\$(\d+(?:\.\d{2})?)', text)
     if match:
         return f"${match.group(1)}"
-    return f"${random.randint(29, 199)}.99"
+    return "Price N/A"
 
 def parse_bullet(bullet_str):
     """Extracts Product Name and Reasoning from a bullet point."""

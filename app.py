@@ -5,6 +5,7 @@ from agent_orchestration import run_agent
 import logging
 from config import DATA_DIR, MODEL_NAME
 from data_loader import load_users, clear_users_cache
+from chat_agent import get_chat_response
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -221,6 +222,42 @@ if not (DATA_DIR / "users.csv").exists():
     st.stop()
 users = load_users()
 
+# ── Chat Session State Init ───────────────────────────────────────────────────
+if "chat_messages" not in st.session_state:
+    st.session_state.chat_messages = []
+if "chat_context" not in st.session_state:
+    st.session_state.chat_context = ""
+if "show_chat_btn" not in st.session_state:
+    st.session_state.show_chat_btn = False
+if "dashboard_generated" not in st.session_state:
+    st.session_state.dashboard_generated = False
+if "raw_md" not in st.session_state:
+    st.session_state.raw_md = ""
+
+# ── 💬 Chatbot Dialog Definition ─────────────────────────────────────────────
+@st.dialog("🛍️ AI Shopping Assistant")
+def chat_dialog():
+    st.caption("Ask about the current shopper's recommendations. Off-topic questions will be redirected.")
+    
+    # Message container defined first so updates show immediately
+    msg_container = st.container()
+    
+    # Streamlit chat_input works perfectly within dialogs without st.rerun() breaking state
+    user_input = st.chat_input("Your question: e.g. Which item is the best value?")
+    
+    if user_input:
+        st.session_state.chat_messages.append({"role": "user", "content": user_input.strip()})
+        with st.spinner("Thinking..."):
+            reply = get_chat_response(st.session_state.chat_messages, st.session_state.chat_context)
+        st.session_state.chat_messages.append({"role": "assistant", "content": reply})
+        
+    # Render messages inside the container
+    with msg_container:
+        for msg in st.session_state.chat_messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+
 # ── Sidebar: Control Panel & Context ──────────────────────────────────────────
 with st.sidebar:
     st.markdown("### 👥 Shopper Management")
@@ -249,6 +286,7 @@ with st.sidebar:
     
     # Placeholder for Agent Context (filled remotely after generation)
     context_placeholder = st.empty()
+
 
 
 # ── Main Dashboard Layout (Storefront) ────────────────────────────────────────
@@ -298,13 +336,27 @@ if submit:
                     st.error("Cannot save profile: The users.csv file is currently open in another program (like Excel). Please close it and try again.")
                     st.stop()
 
+    # ── Reset chat + enable floating button for the new session ─────────────
+    st.session_state.chat_messages = []
+    st.session_state.chat_context = ""
+    st.session_state.show_chat_btn = False
+
     with st.spinner("✨ Analyzing profile and local trends..."):
         try:
             raw_md = run_agent(user_id=payload.get("user_id"), custom_profile=payload.get("profile"))
-            sections, disclaimer = parse_agent_output(raw_md)
+            # Store generation state
+            st.session_state.raw_md = raw_md
+            st.session_state.dashboard_generated = True
+            
+            # Store context for the chatbot and reveal the floating button
+            st.session_state.chat_context = raw_md
+            st.session_state.show_chat_btn = True
         except Exception as exc:
             st.error(f"Runtime Exception: {exc}")
             st.stop()
+
+if st.session_state.get('dashboard_generated', False):
+    sections, disclaimer = parse_agent_output(st.session_state.raw_md)
     
     # ── Render Context into the Sidebar Placeholder ─────────────────────────
     with context_placeholder.container():
@@ -338,3 +390,50 @@ else:
     st.markdown("### 🛒 Welcome to the Storefront")
     st.markdown("Select an existing shopper or create a new profile from the left panel, then click **Generate AI Assistant**.")
     st.markdown('</div>', unsafe_allow_html=True)
+
+# ── 💬 Floating Chat Button (shown only after generation) ───────────────────────
+if st.session_state.show_chat_btn:
+    # Giving the button type="primary" guarantees it receives the kind="primary" 
+    # attribute in the DOM, making it 100% reliably targetable via CSS anywhere on the page.
+    if st.button("💬 Ask Assistant", type="primary", help="Ask AI Assistant"):
+        chat_dialog()
+        
+    st.markdown("""
+    <style>
+    /* Target strictly the primary button to make it float */
+    button[kind="primary"] {
+        position: fixed !important;
+        bottom: 2.5rem !important;
+        right: 2.5rem !important;
+        z-index: 9999 !important;
+        border-radius: 50px !important; /* Pill shape */
+        width: auto !important;
+        height: auto !important;
+        font-size: 1.1rem !important;
+        font-weight: 600 !important;
+        background: linear-gradient(135deg, #10b981, #0ea5e9) !important;
+        box-shadow: 0 4px 20px rgba(16, 185, 129, 0.5) !important;
+        padding: 0.75rem 1.5rem !important;
+        color: white !important;
+        border: none !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+    }
+    button[kind="primary"]:hover {
+        transform: scale(1.05) !important;
+        box-shadow: 0 6px 25px rgba(16, 185, 129, 0.7) !important;
+        background: linear-gradient(135deg, #059669, #0284c7) !important;
+        color: white !important;
+        border: none !important;
+    }
+    /* Ensure the text is properly displayed */
+    button[kind="primary"] p {
+        margin: 0 !important;
+        padding: 0 !important;
+        font-size: inherit !important;
+        display: block !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
